@@ -25,7 +25,7 @@ public class Query {
 
     // Canned queries
 
-    private String _search_sql = "SELECT * FROM movie WHERE name like ? ORDER BY id";
+    private String _search_sql = "SELECT * FROM movie WHERE lower(name) like lower(?) ORDER BY id";
     private PreparedStatement _search_statement;
 
     private String _director_mid_sql = "SELECT y.* "
@@ -33,9 +33,15 @@ public class Query {
                      + "WHERE x.mid = ? and x.did = y.id";
     private PreparedStatement _director_mid_statement;
 
+
+    private String _actor_pid_sql = "SELECT y.* "
+                     + "FROM casts x, actor y "
+                     + "WHERE x.mid = ? and x.pid = y.id";
+    private PreparedStatement _actor_pid_statement;
+
     /* uncomment, and edit, after your create your own customer database */
-    /*
-    private String _customer_login_sql = "SELECT * FROM customers WHERE login = ? and password = ?";
+    
+    private String _customer_login_sql = "SELECT * FROM customer WHERE login = ? and password = ?";
     private PreparedStatement _customer_login_statement;
 
     private String _begin_transaction_read_write_sql = "BEGIN TRANSACTION READ WRITE";
@@ -46,7 +52,19 @@ public class Query {
 
     private String _rollback_transaction_sql = "ROLLBACK TRANSACTION";
     private PreparedStatement _rollback_transaction_statement;
-     */
+     
+    private String _movie_rental_sql = "SELECT customer_id FROM ActiveRental WHERE movie_id = ?";
+    private PreparedStatement _movie_rental_statement;
+
+
+    //(a) movies, (b) movies join directors, (c) movies join actors
+
+    private String _a_movie_sql = "SELECT * FROM Movie WHERE lower(name) like lower(?) ORDER BY id";
+    private PreparedStatement _a_movie_statement;
+    private String _b_movie_directors_sql = "SELECT m.id, d.fname, d.lname FROM movie as m join movie_directors as md on m.id = md.mid join directors as d on md.did = d.id WHERE lower(m.name) like lower(?) ORDER BY m.id";
+    private PreparedStatement _b_movie_directors_statement;
+    private String _c_movie_actor_sql = "SELECT c.mid, a.fname, a.lname FROM movie as m join casts as c on m.id = c.mid join actor as a on c.pid = a.id WHERE lower(m.name) like lower(?) ORDER BY c.mid";
+    private PreparedStatement _c_movie_actor_statement;
 
     public Query() {
     }
@@ -92,14 +110,23 @@ public class Query {
 
         _search_statement = _imdb.prepareStatement(_search_sql);
         _director_mid_statement = _imdb.prepareStatement(_director_mid_sql);
+        _actor_pid_statement = _imdb.prepareStatement(_actor_pid_sql);
+        _a_movie_statement = _imdb.prepareStatement(_a_movie_sql);
+        _b_movie_directors_statement = _imdb.prepareStatement(_b_movie_directors_sql);
+        _c_movie_actor_statement = _imdb.prepareStatement(_c_movie_actor_sql);
+
 
         /* uncomment after you create your customers database */
-        /*
+        
         _customer_login_statement = _customer_db.prepareStatement(_customer_login_sql);
         _begin_transaction_read_write_statement = _customer_db.prepareStatement(_begin_transaction_read_write_sql);
         _commit_transaction_statement = _customer_db.prepareStatement(_commit_transaction_sql);
         _rollback_transaction_statement = _customer_db.prepareStatement(_rollback_transaction_sql);
-         */
+
+        _movie_rental_statement = _customer_db.prepareStatement(_movie_rental_sql);
+
+
+        
 
         /* add here more prepare statements for all the other queries you need */
         /* . . . . . . */
@@ -143,7 +170,7 @@ public class Query {
         /* authenticates the user, and returns the user id, or -1 if authentication fails */
 
         /* Uncomment after you create your own customers database */
-        /*
+        
         int cid;
 
         _customer_login_statement.clearParameters();
@@ -153,8 +180,8 @@ public class Query {
         if (cid_set.next()) cid = cid_set.getInt(1);
         else cid = -1;
         return(cid);
-         */
-        return (55);
+         
+        //return (55);
     }
 
     public void transaction_personal_data(int cid) throws Exception {
@@ -190,8 +217,38 @@ public class Query {
                         + " " + director_set.getString(2));
             }
             director_set.close();
+
             /* now you need to retrieve the actors, in the same manner */
+            _actor_pid_statement.clearParameters();
+            _actor_pid_statement.setInt(1, mid);
+            ResultSet actor_set = _actor_pid_statement.executeQuery();
+            while (actor_set.next()) {
+                System.out.println("\t\tActor: " + actor_set.getString(3)
+                        + " " + actor_set.getString(2));
+            }
+            actor_set.close();
+
             /* then you have to find the status: of "AVAILABLE" "YOU HAVE IT", "UNAVAILABLE" */
+            _movie_rental_statement.clearParameters();
+            _movie_rental_statement.setInt(1, mid);
+            ResultSet rental_set = _movie_rental_statement.executeQuery();
+            int rented_customer_id = 0;
+            while (rental_set.next()){
+                rented_customer_id = Integer.parseInt(rental_set.getString(1));
+            }
+            rental_set.close();
+
+            System.out.print("\t\tStatus: ");
+            if (rented_customer_id > 0){
+                if (rented_customer_id == cid){
+                    System.out.println("YOU HAVE IT");
+                }else{
+                    System.out.println("UNAVAILABLE");
+                }
+            }else{
+                System.out.println("AVAILABLE");
+            }
+
         }
         System.out.println();
     }
@@ -224,6 +281,45 @@ public class Query {
            Needs to run three SQL queries: (a) movies, (b) movies join directors, (c) movies join actors
            Answers are sorted by mid.
            Then merge-joins the three answer sets */
+
+        _a_movie_statement.clearParameters();
+        _a_movie_statement.setString(1, '%' + movie_title + '%');
+        ResultSet _a_set = _a_movie_statement.executeQuery();
+        _b_movie_directors_statement.clearParameters();
+        _b_movie_directors_statement.setString(1, '%' + movie_title + '%');
+        ResultSet _b_set = _b_movie_directors_statement.executeQuery();
+        _c_movie_actor_statement.clearParameters();
+        _c_movie_actor_statement.setString(1, '%' + movie_title + '%');
+        ResultSet _c_set = _c_movie_actor_statement.executeQuery();
+        _b_set.next();
+        _c_set.next();
+
+
+        while (_a_set.next()) {
+            int mid = _a_set.getInt(1);
+            System.out.println("ID: " + mid + " NAME: "
+                    + _a_set.getString(2) + " YEAR: "
+                    + _a_set.getString(3));
+
+
+            while (_b_set.getInt(1) == mid){
+                    System.out.println("\t\tDirector: " + _b_set.getString(3)
+                        + " " + _b_set.getString(2));
+                    if (!_b_set.next()){
+                        break;
+                    }           
+            }
+
+            while (_c_set.getInt(1) == mid){
+
+                    System.out.println("\t\tActor: " + _c_set.getString(3)
+                        + " " + _c_set.getString(2));
+                    if (!_c_set.next()){
+                        break;
+                    }           
+            }            
+
+        }
     }
 
 }
